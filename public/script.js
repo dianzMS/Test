@@ -6,6 +6,7 @@ const modelSelect = document.getElementById("model-select");
 
 let conversationHistory = [];
 
+// Add a plain text message bubble
 function addMessage(role, content) {
   const div = document.createElement("div");
   div.className = `message ${role}`;
@@ -13,6 +14,84 @@ function addMessage(role, content) {
   messagesEl.appendChild(div);
   messagesEl.scrollTop = messagesEl.scrollHeight;
   return div;
+}
+
+// Tool display names
+const TOOL_LABELS = {
+  render_webapp: "Rendering web app",
+  get_current_time: "Getting current time",
+  calculate: "Calculating",
+};
+
+// Show a tool-call indicator bubble while a tool is running
+function addToolCallIndicator(toolName) {
+  const div = document.createElement("div");
+  div.className = "message tool-call";
+  const label = TOOL_LABELS[toolName] || toolName;
+  div.innerHTML =
+    `<span class="tool-icon">🔧</span>` +
+    `<span class="tool-name">${label}</span>` +
+    `<span class="tool-status">Running…</span>`;
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  return div;
+}
+
+// Update a tool-call indicator once the result is available
+function updateToolCallIndicator(div, resultJson) {
+  const statusEl = div.querySelector(".tool-status");
+  if (!statusEl) return;
+  try {
+    const parsed = JSON.parse(resultJson);
+    if (parsed.error) {
+      statusEl.textContent = `Failed: ${parsed.error}`;
+      statusEl.className = "tool-status error";
+    } else {
+      const display =
+        parsed.result ??
+        parsed.datetime ??
+        (parsed.rendered ? "Done" : JSON.stringify(parsed));
+      statusEl.textContent = `✓ ${display}`;
+      statusEl.className = "tool-status done";
+    }
+  } catch {
+    statusEl.textContent = "✓ Done";
+    statusEl.className = "tool-status done";
+  }
+}
+
+// Escape HTML for safe insertion into innerHTML
+function escapeHtml(str) {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+// Render a webapp returned by the AI inside a sandboxed iframe
+function addWebApp(title, html) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "message webapp-message";
+
+  const header = document.createElement("div");
+  header.className = "webapp-header";
+  header.innerHTML =
+    `<span class="webapp-icon">🖥️</span>` +
+    `<span class="webapp-title">${escapeHtml(title)}</span>`;
+
+  const iframe = document.createElement("iframe");
+  iframe.className = "webapp-iframe";
+  // allow-scripts only — iframe has null origin so it cannot access parent cookies/storage
+  iframe.setAttribute("sandbox", "allow-scripts allow-forms");
+  iframe.title = escapeHtml(title);
+  iframe.srcdoc = html;
+
+  wrapper.appendChild(header);
+  wrapper.appendChild(iframe);
+  messagesEl.appendChild(wrapper);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  return wrapper;
 }
 
 function autoResize() {
@@ -44,6 +123,10 @@ form.addEventListener("submit", async (e) => {
   const assistantDiv = addMessage("assistant", "");
   assistantDiv.classList.add("typing-indicator");
 
+  // Map tool_call id → indicator <div> so we can update it on tool_result
+  const toolDivs = {};
+  let fullContent = "";
+
   try {
     const response = await fetch("/api/chat", {
       method: "POST",
@@ -61,39 +144,70 @@ form.addEventListener("submit", async (e) => {
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
-    let fullContent = "";
+    let buffer = "";
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
 
-      const text = decoder.decode(value, { stream: true });
-      const lines = text.split("\n");
+      buffer += decoder.decode(value, { stream: true });
+      // Split on newlines; keep incomplete last line in buffer
+      const lines = buffer.split("\n");
+      buffer = lines.pop();
 
       for (const line of lines) {
         if (!line.startsWith("data: ")) continue;
-        const data = line.slice(6);
-        if (data === "[DONE]") break;
+        const raw = line.slice(6);
+        if (raw === "[DONE]") break;
 
+        let parsed;
         try {
-          const parsed = JSON.parse(data);
-          if (parsed.error) throw new Error(parsed.error);
-          if (parsed.content) {
-            fullContent += parsed.content;
-            assistantDiv.textContent = fullContent;
-            messagesEl.scrollTop = messagesEl.scrollHeight;
-          }
-        } catch (parseErr) {
-          // Skip malformed chunks
+          parsed = JSON.parse(raw);
+        } catch {
+          continue; // Skip malformed chunks
+        }
+
+        if (parsed.error) {
+          throw new Error(parsed.error);
+        }
+
+        if (parsed.tool_call) {
+          // Show tool indicator and pause the assistant typing animation
+          const toolDiv = addToolCallIndicator(parsed.tool_call.name);
+          toolDivs[parsed.tool_call.id] = toolDiv;
+          assistantDiv.classList.remove("typing-indicator");
+        }
+
+        if (parsed.tool_result) {
+          const toolDiv = toolDivs[parsed.tool_result.id];
+          if (toolDiv) updateToolCallIndicator(toolDiv, parsed.tool_result.result);
+        }
+
+        if (parsed.webapp) {
+          addWebApp(parsed.webapp.title, parsed.webapp.html);
+        }
+
+        if (parsed.content) {
+          fullContent += parsed.content;
+          assistantDiv.textContent = fullContent;
+          // Resume typing cursor while text is streaming
+          assistantDiv.classList.add("typing-indicator");
+          messagesEl.scrollTop = messagesEl.scrollHeight;
         }
       }
     }
 
     assistantDiv.classList.remove("typing-indicator");
-    conversationHistory.push({ role: "assistant", content: fullContent });
+
+    if (fullContent) {
+      conversationHistory.push({ role: "assistant", content: fullContent });
+    } else if (!assistantDiv.textContent) {
+      // No text response — remove the empty bubble
+      assistantDiv.remove();
+    }
   } catch (error) {
     assistantDiv.remove();
-    addMessage("error", `错误: ${error.message}`);
+    addMessage("error", `Error: ${error.message}`);
   } finally {
     sendBtn.disabled = false;
     input.focus();

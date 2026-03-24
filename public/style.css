@@ -103,6 +103,86 @@ body {
   font-size: 13px;
 }
 
+/* ── Tool-call indicator ── */
+.message.tool-call {
+  align-self: flex-start;
+  background: #e8f0fe;
+  color: #1a73e8;
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 80%;
+  white-space: normal;
+}
+
+.tool-icon {
+  font-size: 15px;
+  flex-shrink: 0;
+}
+
+.tool-name {
+  font-weight: 600;
+}
+
+.tool-status {
+  color: #5f6368;
+}
+
+.tool-status.done {
+  color: #137333;
+}
+
+.tool-status.error {
+  color: #c5221f;
+}
+
+/* ── Embedded web app ── */
+.message.webapp-message {
+  align-self: flex-start;
+  background: #fff;
+  border: 1px solid #dadce0;
+  border-radius: 12px;
+  overflow: hidden;
+  padding: 0;
+  max-width: 95%;
+  width: 100%;
+  white-space: normal;
+}
+
+.webapp-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: #f8f9fa;
+  border-bottom: 1px solid #dadce0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #3c4043;
+}
+
+.webapp-icon {
+  font-size: 15px;
+}
+
+.webapp-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.webapp-iframe {
+  width: 100%;
+  min-height: 320px;
+  border: none;
+  display: block;
+}
+
+/* ── Input area ── */
 .chat-input {
   display: flex;
   gap: 8px;
